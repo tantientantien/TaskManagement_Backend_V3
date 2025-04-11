@@ -455,6 +455,11 @@ Network Trash Folder
 Temporary Items
 .apdisk
 
+# Appsettings
+appsettings.*.json
+appsettings.json  
+secrets.json
+
 # content below from: https://github.com/github/gitignore/blob/main/Global/Windows.gitignore
 # Windows thumbnail cache files
 Thumbs.db
