@@ -19,7 +19,7 @@ builder.Services.AddMediatR(cfg => {
 builder.Services.AddValidatorsFromAssembly(typeof(Program).Assembly);
 
 // Middleware Configuration, Included: Validation, Serilog
-builder.Services.AddScoped(typeof(IPipelineBehavior<,>), typeof(LoggingPipelineBehavior<,>));
+// builder.Services.AddScoped(typeof(IPipelineBehavior<,>), typeof(LoggingPipelineBehavior<,>));
 builder.Host.UseSerilog((context, configuration) => configuration.ReadFrom.Configuration(context.Configuration));
 
 var app = builder.Build();
