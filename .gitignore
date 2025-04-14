@@ -457,7 +457,7 @@ Temporary Items
 
 # Appsettings
 appsettings.*.json
-appsettings.json  
+appsettings.json
 secrets.json
 
 # content below from: https://github.com/github/gitignore/blob/main/Global/Windows.gitignore
@@ -487,3 +487,5 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+Trash/
