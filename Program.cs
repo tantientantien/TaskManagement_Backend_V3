@@ -1,81 +1,191 @@
-using Backend.Behaviors;
 using Backend.Extensions;
 using Behaviors.Common;
+using Clerk.Net.AspNetCore.Security;
 using FluentValidation;
-using MediatR;
+using Hellang.Middleware.ProblemDetails;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Scalar.AspNetCore;
 using Serilog;
+using Backend.Common;
+using Microsoft.AspNetCore.Authorization;
+using Backend.Services;
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
+var configuration = builder.Configuration;
+var env = builder.Environment;
 
+//----------------------------------------
+// Core Services
+//----------------------------------------
+builder.Services.AddHttpClient();
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddControllers();
+builder.Services.AddEndpointsApiExplorer();
 
+//----------------------------------------
+// Database Configutation
+//----------------------------------------
+builder.Services.AddDbContext<Backend.Entities.AppContext>(options =>
+    options.UseSqlServer(
+        builder.Configuration.GetConnectionString("DefaultConnectionString")
+    )
+);
+
+//----------------------------------------
+// CORS Configuration
+//----------------------------------------
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("DefaultPolicy", policy =>
+    {
+        policy.WithOrigins(
+                configuration.GetSection("CorsOrigins").Get<string[]>() ?? 
+                new[] { "https://localhost:5001", "http://localhost:3000" })
+            .AllowAnyMethod()
+            .AllowAnyHeader()
+            .AllowCredentials();
+    });
+});
+
+//----------------------------------------
+// Documentation
+//----------------------------------------
 builder.Services.AddOpenApi();
 
-// MediatR And Fluent Validation
-builder.Services.AddMediatR(cfg => {
+//----------------------------------------
+// Validation & MediatR
+//----------------------------------------
+builder.Services.AddMediatR(cfg =>
+{
     cfg.RegisterServicesFromAssembly(typeof(Program).Assembly);
     cfg.AddOpenBehavior(typeof(ValidationBehavior<,>));
 });
 builder.Services.AddValidatorsFromAssembly(typeof(Program).Assembly);
 
-// Middleware Configuration, Included: Validation, Serilog
-builder.Services.AddScoped(typeof(IPipelineBehavior<,>), typeof(LoggingPipelineBehavior<,>));
-builder.Host.UseSerilog((context, configuration) => configuration.ReadFrom.Configuration(context.Configuration));
+//----------------------------------------
+// Logging
+//----------------------------------------
+builder.Host.UseSerilog((context, configuration) =>
+{
+    configuration.ReadFrom.Configuration(context.Configuration);
+});
 
+//----------------------------------------
+// Error Handling
+//----------------------------------------
+builder.Services.AddProblemDetails(options =>
+{
+    options.IncludeExceptionDetails = (ctx, ex) => env.IsDevelopment();
+
+    // Custom error mappings for flutent validation
+    options.Map<ValidationException>(exception => new ProblemDetails
+    {
+        Title = "Validation Error",
+        Status = StatusCodes.Status400BadRequest,
+        Detail = exception.Message
+    });
+
+    options.Map<ClerkApiException>(exception => new ProblemDetails
+    {
+        Title = "Clerk API Error",
+        Status = exception.StatusCode,
+        Detail = exception.Message
+    });
+
+    options.MapToStatusCode<NotImplementedException>(StatusCodes.Status501NotImplemented);
+    options.MapToStatusCode<Exception>(StatusCodes.Status500InternalServerError);
+});
+
+//----------------------------------------
+// Authentication & Authorization
+//----------------------------------------
+builder.Services.AddAuthentication(options =>
+{
+    options.DefaultAuthenticateScheme = ClerkAuthenticationDefaults.AuthenticationScheme;
+    options.DefaultChallengeScheme = ClerkAuthenticationDefaults.AuthenticationScheme;
+})
+.AddClerkAuthentication(x =>
+{
+    x.Authority = configuration["Clerk:Authority"]
+        ?? throw new InvalidOperationException("Clerk:Authority is missing");
+    x.AuthorizedParty = configuration["Clerk:AuthorizedParty"]
+        ?? throw new InvalidOperationException("Clerk:AuthorizedParty is missing");
+})
+.AddJwtBearer(options =>
+{
+    options.Events = new JwtBearerEvents
+    {
+        OnMessageReceived = context =>
+        {
+            var accessToken = context.Request.Cookies["__session"];
+            if (!string.IsNullOrEmpty(accessToken))
+            {
+                context.Token = accessToken;
+            }
+            return Task.CompletedTask;
+        }
+    };
+});
+
+// Authorization policies
+builder.Services.AddAuthorizationBuilder()
+    .SetFallbackPolicy(new AuthorizationPolicyBuilder()
+        .RequireAuthenticatedUser()
+        .Build());
+
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("AdminOnly", policy => policy.RequireRole("admin"));
+    options.AddPolicy("ReadOnly", policy => policy.RequireClaim("permission", "read"));
+    options.AddPolicy("WriteAccess", policy => policy.RequireClaim("permission", "write"));
+});
+
+//----------------------------------------
+// Application Services
+//----------------------------------------
+builder.Services.AddScoped<UserManagement>();
+builder.Services.AddScoped<UserPermission>();
+
+//----------------------------------------
+// App Configuration
+//----------------------------------------
 var app = builder.Build();
 
-// Add request logging early in the pipeline
+//----------------------------------------
+// Middleware Pipeline
+//----------------------------------------
+// Development specific middleware
+if (env.IsDevelopment())
+{
+    app.UseDeveloperExceptionPage();
+    app.MapOpenApi();
+    app.MapScalarApiReference();
+}
+else
+{
+    app.UseHsts();
+}
+
+// Core middleware
 app.UseSerilogRequestLogging(options =>
 {
     options.MessageTemplate = "HTTP {RequestMethod} {RequestPath} responded {StatusCode} in {Elapsed:0.0000} ms";
 });
-
-// Global Exception Handler
-app.UseExceptionHandler(errorApp =>
-{
-    errorApp.Run(async context =>
-    {
-        var error = context.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>();
-        if (error?.Error is ValidationException validationException)
-        {
-            context.Response.StatusCode = StatusCodes.Status400BadRequest;
-            Log.Error(validationException, "Validation error occurred");
-            await context.Response.WriteAsJsonAsync(validationException.Errors);
-            return;
-        }
-        
-        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
-        Log.Error(error?.Error, "An unhandled error occurred");
-        await context.Response.WriteAsJsonAsync(new { error = "An error occurred processing your request." });
-    });
-});
-
-
-app.Use(async (context, next) =>
-{
-    var random = new Random();
-    var number = random.Next(1, 1000);
-    Console.WriteLine($"[Middleware] Random number: {number}");
-
-    if (number % 3 == 0)
-    {
-        throw new Exception($"Please catch this error :))");
-    }
-
-    await next();
-});
-
-
-
-
-if (app.Environment.IsDevelopment())
-{
-    app.MapScalarApiReference();
-    app.MapOpenApi();
-}
-
+app.UseProblemDetails();
 app.UseHttpsRedirection();
 
+// CORS must be before auth
+app.UseCors("DefaultPolicy");
+
+// Security middleware
+app.UseAuthentication();
+app.UseAuthorization();
+
+//----------------------------------------
+// Endpoints
+//----------------------------------------
 app.MapApplicationEndpoints(typeof(Program).Assembly);
 
 app.Run();
