@@ -1,9 +1,7 @@
 using Backend.Services;
 using MediatR;
-using Microsoft.AspNetCore.Http;
-using Serilog;
 
-namespace Endpoints.Users;
+namespace Endpoints.User;
 
 public class GetUser : IMapEndpoint
 {

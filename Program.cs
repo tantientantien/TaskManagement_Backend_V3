@@ -6,11 +6,14 @@ using Hellang.Middleware.ProblemDetails;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Scalar.AspNetCore;
-using Serilog;
 using Backend.Common;
 using Microsoft.AspNetCore.Authorization;
 using Backend.Services;
 using Microsoft.EntityFrameworkCore;
+using Serilog;
+using Serilog.Events;
+using Microsoft.AspNetCore.Diagnostics;
+
 
 var builder = WebApplication.CreateBuilder(args);
 var configuration = builder.Configuration;
@@ -25,9 +28,9 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 
 //----------------------------------------
-// Database Configutation
+// Database Configuration
 //----------------------------------------
-builder.Services.AddDbContext<Backend.Entities.AppContext>(options =>
+builder.Services.AddDbContext<Backend.Entities.TaskManagementContext>(options =>
     options.UseSqlServer(
         builder.Configuration.GetConnectionString("DefaultConnectionString")
     )
@@ -41,7 +44,7 @@ builder.Services.AddCors(options =>
     options.AddPolicy("DefaultPolicy", policy =>
     {
         policy.WithOrigins(
-                configuration.GetSection("CorsOrigins").Get<string[]>() ?? 
+                configuration.GetSection("CorsOrigins").Get<string[]>() ??
                 new[] { "https://localhost:5001", "http://localhost:3000" })
             .AllowAnyMethod()
             .AllowAnyHeader()
@@ -67,9 +70,13 @@ builder.Services.AddValidatorsFromAssembly(typeof(Program).Assembly);
 //----------------------------------------
 // Logging
 //----------------------------------------
-builder.Host.UseSerilog((context, configuration) =>
+builder.Host.UseSerilog((context, services, configuration) =>
 {
-    configuration.ReadFrom.Configuration(context.Configuration);
+    configuration
+        .ReadFrom.Configuration(context.Configuration)
+        .ReadFrom.Services(services)
+        .Enrich.FromLogContext()
+        .Enrich.WithProperty("Environment", env.EnvironmentName);
 });
 
 //----------------------------------------
@@ -79,7 +86,16 @@ builder.Services.AddProblemDetails(options =>
 {
     options.IncludeExceptionDetails = (ctx, ex) => env.IsDevelopment();
 
-    // Custom error mappings for flutent validation
+    options.OnBeforeWriteDetails = (ctx, problemDetails) => 
+    {
+        var logger = ctx.RequestServices.GetRequiredService<ILogger<Program>>();
+        if(ctx.Features.Get<IExceptionHandlerFeature>() is {Error: Exception ex})
+        {
+            logger.LogError(ex, "Unhandled exception occurred while executing request {Path}", ctx.Request.Path);
+        }
+    };
+
+    // Error mappings for flutent validation
     options.Map<ValidationException>(exception => new ProblemDetails
     {
         Title = "Validation Error",
@@ -94,6 +110,7 @@ builder.Services.AddProblemDetails(options =>
         Detail = exception.Message
     });
 
+    options.MapToStatusCode<KeyNotFoundException>(StatusCodes.Status404NotFound);
     options.MapToStatusCode<NotImplementedException>(StatusCodes.Status501NotImplemented);
     options.MapToStatusCode<Exception>(StatusCodes.Status500InternalServerError);
 });
@@ -135,18 +152,20 @@ builder.Services.AddAuthorizationBuilder()
         .RequireAuthenticatedUser()
         .Build());
 
+
 builder.Services.AddAuthorization(options =>
 {
-    options.AddPolicy("AdminOnly", policy => policy.RequireRole("admin"));
+    options.AddPolicy("AdminOnly", policy => policy.RequireRole("Admin"));
     options.AddPolicy("ReadOnly", policy => policy.RequireClaim("permission", "read"));
     options.AddPolicy("WriteAccess", policy => policy.RequireClaim("permission", "write"));
 });
 
-//----------------------------------------
 // Application Services
 //----------------------------------------
+builder.Services.AddScoped<IAzureService, AzureService>();
 builder.Services.AddScoped<UserManagement>();
 builder.Services.AddScoped<UserPermission>();
+builder.Services.AddAutoMapper(typeof(Program).Assembly);
 
 //----------------------------------------
 // App Configuration
@@ -169,19 +188,34 @@ else
 }
 
 // Core middleware
-app.UseSerilogRequestLogging(options =>
-{
-    options.MessageTemplate = "HTTP {RequestMethod} {RequestPath} responded {StatusCode} in {Elapsed:0.0000} ms";
-});
 app.UseProblemDetails();
 app.UseHttpsRedirection();
 
-// CORS must be before auth
+// CORS
 app.UseCors("DefaultPolicy");
 
 // Security middleware
 app.UseAuthentication();
 app.UseAuthorization();
+
+app.UseSerilogRequestLogging(options =>
+{
+    options.MessageTemplate = "HTTP {RequestMethod} {RequestPath} responded {StatusCode} in {Elapsed:0.0000} ms";
+    options.EnrichDiagnosticContext = (diagnosticContext, httpContext) =>
+    {
+        diagnosticContext.Set("RequestHost", httpContext.Request.Host.Value!);
+        diagnosticContext.Set("RequestScheme", httpContext.Request.Scheme);
+        diagnosticContext.Set("UserAgent", httpContext.Request.Headers["User-Agent"]);
+    };
+    options.GetLevel = (httpContext, elapsed, ex) =>
+    {
+        if (ex != null || httpContext.Response.StatusCode > 499)
+            return LogEventLevel.Error;
+        if (httpContext.Response.StatusCode > 399)
+            return LogEventLevel.Warning;
+        return LogEventLevel.Information;
+    };
+});
 
 //----------------------------------------
 // Endpoints

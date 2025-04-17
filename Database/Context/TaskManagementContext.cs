@@ -1,9 +1,9 @@
 using Microsoft.EntityFrameworkCore;
 
 namespace Backend.Entities;
-public class AppContext : DbContext
+public class TaskManagementContext : DbContext
 {
-    public AppContext(DbContextOptions<AppContext> options) : base(options) { }
+    public TaskManagementContext(DbContextOptions<TaskManagementContext> options) : base(options) { }
     public DbSet<Category> Categories { get; set; }
     public DbSet<TaskItem> Tasks { get; set; }
     public DbSet<Label> Labels { get; set; }
