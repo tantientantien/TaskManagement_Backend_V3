@@ -9,7 +9,7 @@ public class AzureService : IAzureService
     public AzureService(IConfiguration configuration)
     {
         _blobServiceClient = new BlobServiceClient(configuration["BlobConnectionString"]);
-        _blobContainerName = configuration["BlobContainerName"] ?? throw new ArgumentNullException(nameof(_blobContainerName), "BlobContainerName is required in configuration");
+        _blobContainerName = configuration["BlobContainerName"]!;
     }
 
     public async Task<UploadResultDto> UploadAsync(IFormFile file)
