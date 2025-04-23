@@ -13,7 +13,8 @@ using Microsoft.EntityFrameworkCore;
 using Serilog;
 using Serilog.Events;
 using Microsoft.AspNetCore.Diagnostics;
-
+using System.Security.Claims;
+using Backend.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 var configuration = builder.Configuration;
@@ -146,31 +147,55 @@ builder.Services.AddAuthentication(options =>
     };
 });
 
-// Authorization policies
-builder.Services.AddAuthorizationBuilder()
-    .SetFallbackPolicy(new AuthorizationPolicyBuilder()
-        .RequireAuthenticatedUser()
-        .Build());
-
 
 builder.Services.AddAuthorization(options =>
 {
     options.AddPolicy("AdminOnly", policy => policy.RequireRole("Admin"));
     options.AddPolicy("ReadOnly", policy => policy.RequireClaim("permission", "read"));
     options.AddPolicy("WriteAccess", policy => policy.RequireClaim("permission", "write"));
+    
+    // Add policy for Admin or Creator
+    options.AddPolicy("AdminOrCreator", policy => policy.RequireAssertion(context =>
+    {
+        var isAdmin = context.User.IsInRole("Admin");
+        var userIdClaim = context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var resourceUserId = context.Resource as string;
+        var isCreator = !string.IsNullOrEmpty(userIdClaim) && userIdClaim == resourceUserId;
+        return isAdmin || isCreator;
+    }));
+
+    // Add policy for Admin, Creator or Assignee
+    options.AddPolicy("AdminOrCreatorOrAssignee", policy => policy.RequireAssertion(context =>
+    {
+        var isAdmin = context.User.IsInRole("Admin");
+        var userIdClaim = context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var resource = context.Resource as ResourceData;
+        var isCreator = resource != null && !string.IsNullOrEmpty(userIdClaim) && userIdClaim == resource.UserId;
+        var isAssignee = resource != null && !string.IsNullOrEmpty(userIdClaim) && userIdClaim == resource.AssigneeId;
+        return isAdmin || isCreator || isAssignee;
+    }));
 });
 
 // Application Services
 //----------------------------------------
 builder.Services.AddScoped<IAzureService, AzureService>();
-builder.Services.AddScoped<UserManagement>();
-builder.Services.AddScoped<UserPermission>();
+builder.Services.AddScoped<UserService>();
 builder.Services.AddAutoMapper(typeof(Program).Assembly);
+builder.Services.AddScoped<IUserService, UserService>();
+builder.Services.AddHttpClient<IApiClient, ClerkApiClient>();
+builder.Services.AddScoped<UserSyncService>();
 
 //----------------------------------------
 // App Configuration
 //----------------------------------------
 var app = builder.Build();
+
+// Sync users when the app starts
+using (var scope = app.Services.CreateScope())
+{
+    var userSyncService = scope.ServiceProvider.GetRequiredService<UserSyncService>();
+    await userSyncService.SyncUsersAsync();
+}
 
 //----------------------------------------
 // Middleware Pipeline
@@ -181,6 +206,7 @@ if (env.IsDevelopment())
     app.UseDeveloperExceptionPage();
     app.MapOpenApi();
     app.MapScalarApiReference();
+    app.UseFakeAuthentication();
 }
 else
 {
@@ -190,7 +216,7 @@ else
 // Core middleware
 app.UseProblemDetails();
 app.UseHttpsRedirection();
-
+app.UseClerkWebhookVerification();
 // CORS
 app.UseCors("DefaultPolicy");
 
@@ -221,5 +247,6 @@ app.UseSerilogRequestLogging(options =>
 // Endpoints
 //----------------------------------------
 app.MapApplicationEndpoints(typeof(Program).Assembly);
+
 
 app.Run();

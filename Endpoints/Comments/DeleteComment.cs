@@ -1,6 +1,8 @@
 using Backend.Entities;
-using Backend.Services;
 using MediatR;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 
 namespace Endpoints.Comments.DeleteComment;
 
@@ -12,10 +14,28 @@ public class DeleteCommentEndpoint : IMapEndpoint
 {
     public void MapEndpoint(WebApplication app)
     {
-        app.MapDelete("/comments/{id:int}", async (int id, IMediator mediator) =>
+        app.MapDelete("/comments/{id:int}", async (
+            int id,
+            IMediator mediator,
+            TaskManagementContext db,
+            IAuthorizationService authService,
+            ClaimsPrincipal user) =>
         {
+            var comment = await db.TaskComments.FindAsync([id]);
+
+            if (comment is null)
+                return Results.NotFound();
+
+            var resource = comment.UserId;
+
+            var authResult = await authService.AuthorizeAsync(user, resource, "AdminOrCreator");
+
+            if (!authResult.Succeeded)
+                return Results.Forbid();
+
             await mediator.Send(new Request(id));
             return Results.NoContent();
+
         })
         .WithOpenApi()
         .WithTags("Comment")
@@ -23,17 +43,13 @@ public class DeleteCommentEndpoint : IMapEndpoint
     }
 }
 
-
-// Handler
 public class RequestHandler : IRequestHandler<Request, Unit>
 {
     private readonly TaskManagementContext _dbContext;
-    private readonly UserPermission _userPermission;
 
-    public RequestHandler(TaskManagementContext dbContext, UserPermission userPermission)
+    public RequestHandler(TaskManagementContext dbContext)
     {
         _dbContext = dbContext;
-        _userPermission = userPermission;
     }
 
     public async Task<Unit> Handle(Request request, CancellationToken cancellationToken)
@@ -41,16 +57,7 @@ public class RequestHandler : IRequestHandler<Request, Unit>
         var comment = await _dbContext.TaskComments.FindAsync([request.Id], cancellationToken);
 
         if (comment is null)
-        {
-            throw new Exception("Comment not found");
-        }
-
-        var canDelete = await _userPermission.CanEditAsAdminOrCreator(comment.UserId, cancellationToken);
-
-        if (!canDelete)
-        {
-            throw new Exception("You do not have permission to delete this comment");
-        }
+            throw new KeyNotFoundException("Comment not found");
 
         _dbContext.TaskComments.Remove(comment);
         await _dbContext.SaveChangesAsync(cancellationToken);

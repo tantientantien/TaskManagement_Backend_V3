@@ -64,14 +64,14 @@ public class GetTaskComment : IMapEndpoint
 public class RequestHandler : IRequestHandler<Request, PaginatedResponse<CommentData>>
 {
     private readonly TaskManagementContext _dbContext;
-    private readonly UserManagement _userManagement;
+    private readonly UserService _userService;
 
     public RequestHandler(
         TaskManagementContext dbContext,
-        UserManagement userManagement)
+        UserService userService)
     {
         _dbContext = dbContext;
-        _userManagement = userManagement;
+        _userService = userService;
     }
 
     public async Task<PaginatedResponse<CommentData>> Handle(Request request, CancellationToken cancellationToken)
@@ -97,7 +97,7 @@ public class RequestHandler : IRequestHandler<Request, PaginatedResponse<Comment
 
         // Fetch user data for all comments
         var userIds = comments.Select(c => c.Author.Id).Distinct().ToList();
-        var userTasks = userIds.Select(id => _userManagement.FetchClerkUserAsync(id));
+        var userTasks = userIds.Select(id => _userService.FetchClerkUserAsync(id));
         var users = await Task.WhenAll(userTasks);
 
         var userMap = users

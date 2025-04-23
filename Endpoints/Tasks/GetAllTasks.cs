@@ -4,6 +4,7 @@ using Backend.Entities;
 using FluentValidation;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
+using System.Linq.Dynamic.Core;
 
 namespace Endpoints.Tasks.GetAll;
 
@@ -43,7 +44,8 @@ public record Request(
     string? Search = null,
     bool? IsCompleted = null,
     string? AssigneeId = null,
-    string? SortBy = null) : IRequest<IEnumerable<TaskData>>;
+    string? SortBy = null,
+    string? SortDirection = null) : IRequest<IEnumerable<TaskData>>;
 
 // Endpoint Mapping
 public class GetAllTasks : IMapEndpoint
@@ -82,32 +84,28 @@ public class RequestHandler : IRequestHandler<Request, IEnumerable<TaskData>>
         // Apply filters
         if (!string.IsNullOrEmpty(request.Search))
         {
-            query = query.Where(t => t.Title.Contains(request.Search));
+            query = query.Where("Title.Contains(@0)", request.Search);
         }
         if (request.IsCompleted.HasValue)
         {
-            query = query.Where(t => t.IsCompleted == request.IsCompleted.Value);
+            query = query.Where("IsCompleted == @0", request.IsCompleted.Value);
         }
         if (!string.IsNullOrEmpty(request.AssigneeId))
         {
-            query = query.Where(t => t.AssigneeId == request.AssigneeId);
+            query = query.Where("AssigneeId == @0", request.AssigneeId);
         }
 
         // Apply sorting
-        query = request.SortBy?.ToLower() switch
-        {
-            "title" => query.OrderBy(t => t.Title),
-            "duedate" => query.OrderBy(t => t.Duedate),
-            "createdat" => query.OrderBy(t => t.CreatedAt),
-            _ => query.OrderBy(t => t.Id)
-        };
+        var sortBy = !string.IsNullOrEmpty(request.SortBy) ? request.SortBy.ToLower() : "id";
+        var sortDirection = request.SortDirection?.ToLower() == "desc" ? "descending" : "ascending";
+        query = query.OrderBy($"{sortBy} {sortDirection}");
 
-        // Apply paging
+        // Apply paging and project
         var skip = (request.PageNumber - 1) * request.PageSize;
         var result = await query
+            .AsNoTracking()
             .Skip(skip)
             .Take(request.PageSize)
-            .AsNoTracking()
             .ProjectTo<TaskData>(_mapper.ConfigurationProvider)
             .ToListAsync(cancellationToken);
 
@@ -148,5 +146,7 @@ public class RequestValidator : AbstractValidator<Request>
         RuleFor(x => x.AssigneeId).NotEmpty().When(x => x.AssigneeId != null);
         RuleFor(x => x.SortBy).Must(x => x == null || new[] { "id", "title", "duedate", "createdat" }.Contains(x.ToLower()))
             .WithMessage("SortBy must be 'id', 'title', 'duedate', or 'createdat'");
+        RuleFor(x => x.SortDirection).Must(x => x == null || new[] { "asc", "desc" }.Contains(x.ToLower()))
+            .WithMessage("SortDirection must be 'asc' or 'desc'");
     }
 }

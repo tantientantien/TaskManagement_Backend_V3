@@ -11,7 +11,12 @@ public class TaskItem
     public string Description { get; set; }
     public bool IsCompleted { get; set; }
     public string UserId { get; set; }
+
+    [ForeignKey("UserId")]
+    public User User { get; set; }
     public string AssigneeId { get; set; }
+    [ForeignKey("AssigneeId")]
+    public User Assignee { get; set; }
     public int CategoryId { get; set; }
     [ForeignKey("CategoryId")]
     public Category Category { get; set; }

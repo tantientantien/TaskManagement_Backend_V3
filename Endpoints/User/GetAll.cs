@@ -17,16 +17,16 @@ public class GetUser : IMapEndpoint
 
     public class RequestHandler : IRequestHandler<Request, IEnumerable<UserDataDto>>
     {
-        private readonly UserManagement _userManagement;
+        private readonly UserService _userService;
 
-        public RequestHandler(UserManagement userManagement)
+        public RequestHandler(UserService userService)
         {
-            _userManagement = userManagement ?? throw new ArgumentNullException(nameof(userManagement));
+            _userService = userService ?? throw new ArgumentNullException(nameof(userService));
         }
 
         public async Task<IEnumerable<UserDataDto>> Handle(Request request, CancellationToken cancellationToken)
         {
-            var users = await _userManagement.GetAllUsersAsync(cancellationToken);
+            var users = await _userService.GetAllUsersAsync(cancellationToken);
             var userDtos = users.Select(user => new UserDataDto
             {
                 Id = user.Id,
@@ -47,7 +47,7 @@ public class GetUser : IMapEndpoint
             return Results.Ok(response);
         })
         .WithOpenApi()
-        .WithTags("User")
-        .RequireAuthorization("AdminOnly");
+        .WithTags("User");
+        //.RequireAuthorization("AdminOnly");
     }
 }

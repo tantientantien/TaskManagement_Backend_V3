@@ -1,6 +1,26 @@
 using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
 
+public class UploadResultDto
+{
+    public string FileName { get; set; }
+
+    public string Url { get; set; }
+
+    public DateTime UploadDate { get; set; }
+
+    public long? FileSize { get; set; }
+}
+
+
+public interface IAzureService
+{
+    Task<UploadResultDto> UploadAsync(IFormFile file);
+    Task<bool> DeleteAsync(string blobFilename);
+    Task<(Stream stream, string contentType, string fileName)> DownloadAsync(string blobFilename);
+}
+
+
 public class AzureService : IAzureService
 {
     private readonly BlobServiceClient _blobServiceClient;

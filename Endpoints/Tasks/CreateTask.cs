@@ -29,8 +29,8 @@ public class CreateTask : IMapEndpoint
             return Results.NoContent();
         })
         .WithOpenApi()
-        .WithTags("Task")
-        .RequireAuthorization();
+        .WithTags("Task");
+        //.RequireAuthorization();
     }
 }
 
@@ -39,22 +39,22 @@ public class RequestHandler : IRequestHandler<TaskCreate, Unit>
 {
     private readonly TaskManagementContext _dbContext;
     private readonly IMapper _mapper;
-    private readonly UserManagement _userManagement;
+    private readonly UserService _userService;
 
     public RequestHandler(
         TaskManagementContext dbContext,
         IMapper mapper,
-        UserManagement userManagement)
+        UserService userService)
     {
         _dbContext = dbContext;
         _mapper = mapper;
-        _userManagement = userManagement;
+        _userService = userService;
     }
 
     public async Task<Unit> Handle(TaskCreate request, CancellationToken cancellationToken)
     {
         var task = _mapper.Map<TaskItem>(request);
-        task.UserId = _userManagement.GetCurrentUserId();
+        task.UserId = _userService.GetCurrentUserId();
         task.CreatedAt = DateTime.UtcNow;
 
         _dbContext.Tasks.Add(task);

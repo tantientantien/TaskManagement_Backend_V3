@@ -1,7 +1,9 @@
 using Backend.Entities;
 using Backend.Services;
 using MediatR;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 
 namespace Endpoints.Attachments.DeleteAttachment;
 
@@ -13,10 +15,31 @@ public class DeleteAttachmentEndpoint : IMapEndpoint
 {
     public void MapEndpoint(WebApplication app)
     {
-        app.MapDelete("/attachments/{attachmentId:int}", async (int attachmentId, IMediator mediator) =>
+        app.MapDelete("/attachments/{attachmentId:int}", async (
+            int attachmentId,
+            TaskManagementContext db,
+            IAuthorizationService authService,
+            ClaimsPrincipal user,
+            IAzureService azureService,
+            IMediator mediator) =>
         {
+            var attachment = await db.TaskAttachments
+                .Include(a => a.Task)
+                .FirstOrDefaultAsync(a => a.Id == attachmentId);
+
+            if (attachment is null)
+                return Results.NotFound("Attachment not found");
+
+            var resourceUserId = attachment.Task.UserId;
+
+            var authResult = await authService.AuthorizeAsync(user, resourceUserId, "AdminOrCreator");
+
+            if (!authResult.Succeeded)
+                return Results.Forbid();
+
             var result = await mediator.Send(new Request(attachmentId));
             return result;
+
         })
         .WithOpenApi()
         .WithTags("Attachment")
@@ -25,40 +48,27 @@ public class DeleteAttachmentEndpoint : IMapEndpoint
     }
 }
 
-// Request Handler
+// Handler chỉ xử lý xóa attachment và gọi AzureService
 public class RequestHandler : IRequestHandler<Request, IResult>
 {
     private readonly TaskManagementContext _dbContext;
     private readonly IAzureService _azureService;
-    private readonly UserPermission _userPermission;
 
-    private readonly UserManagement _userManagement;
-
-    public RequestHandler(TaskManagementContext dbContext, IAzureService azureService, UserPermission userPermission, UserManagement userManagement)
+    public RequestHandler(TaskManagementContext dbContext, IAzureService azureService)
     {
         _dbContext = dbContext;
         _azureService = azureService;
-        _userPermission = userPermission;
-        _userManagement = userManagement;
     }
 
     public async Task<IResult> Handle(Request request, CancellationToken cancellationToken)
     {
         var attachment = await _dbContext.TaskAttachments
-            .Include(a => a.Task)
             .FirstOrDefaultAsync(a => a.Id == request.AttachmentId, cancellationToken);
 
         if (attachment is null)
-        {
             return Results.NotFound("Attachment not found");
-        }
-
-        var hasPermission = await _userPermission.CanEditAsAdminOrCreator(_userManagement.GetCurrentUserId(), cancellationToken);
-        if (!hasPermission)
-            return Results.Forbid();
 
         await _azureService.DeleteAsync(attachment.FileName);
-
         _dbContext.TaskAttachments.Remove(attachment);
         await _dbContext.SaveChangesAsync(cancellationToken);
 

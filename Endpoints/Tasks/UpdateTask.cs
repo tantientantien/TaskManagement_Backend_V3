@@ -69,11 +69,35 @@ public class UpdateProfile : Profile
     public UpdateProfile()
     {
         CreateMap<TaskUpdate, TaskItem>()
-            .ForMember(dest => dest.Title, opt => opt.Condition(src => src.Title != null))
-            .ForMember(dest => dest.Description, opt => opt.Condition(src => src.Description != null))
-            .ForMember(dest => dest.IsCompleted, opt => opt.Condition(src => src.IsCompleted.HasValue))
-            .ForMember(dest => dest.CategoryId, opt => opt.MapFrom((src, dest) => src.CategoryId ?? dest.CategoryId))
-            .ForMember(dest => dest.AssigneeId, opt => opt.MapFrom((src, dest) => !string.IsNullOrEmpty(src.AssigneeId) ? src.AssigneeId : dest.AssigneeId))
-            .ForMember(dest => dest.Duedate, opt => opt.MapFrom((src, dest) => src.Duedate ?? dest.Duedate));
+            // Title
+            .ForMember(dest => dest.Title, opt => {
+                opt.PreCondition(src => src.Title != null);
+                opt.MapFrom(src => src.Title);
+            })
+            // Description
+            .ForMember(dest => dest.Description, opt => {
+                opt.PreCondition(src => src.Description != null);
+                opt.MapFrom(src => src.Description);
+            })
+            // IsCompleted
+            .ForMember(dest => dest.IsCompleted, opt => {
+                opt.PreCondition(src => src.IsCompleted.HasValue);
+                opt.MapFrom(src => src.IsCompleted.Value);
+            })
+            // CategoryId
+            .ForMember(dest => dest.CategoryId, opt => {
+                opt.PreCondition(src => src.CategoryId.HasValue);
+                opt.MapFrom(src => src.CategoryId.Value);
+            })
+            // AssigneeId
+            .ForMember(dest => dest.AssigneeId, opt => {
+                opt.PreCondition(src => !string.IsNullOrEmpty(src.AssigneeId));
+                opt.MapFrom(src => src.AssigneeId);
+            })
+            // Duedate
+            .ForMember(dest => dest.Duedate, opt => {
+                opt.PreCondition(src => src.Duedate.HasValue);
+                opt.MapFrom(src => src.Duedate.Value);
+            });
     }
 }

@@ -11,6 +11,8 @@ public class TaskComment
     [ForeignKey("TaskId")]
     public TaskItem Task { get; set; }
     public string UserId { get; set; }
+    [ForeignKey("UserId")]
+    public User User { get; set; }
     public string Content { get; set; }
     public DateTime CreatedAt { get; set; }
 }

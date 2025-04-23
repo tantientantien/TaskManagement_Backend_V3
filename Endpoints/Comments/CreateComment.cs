@@ -30,17 +30,17 @@ public class CreateComment : IMapEndpoint
 public class RequestHandler : IRequestHandler<CommentCreate, Unit>
 {
     private readonly TaskManagementContext _dbContext;
-    private readonly UserManagement _userManagement;
+    private readonly UserService _userService;
 
-    public RequestHandler(TaskManagementContext dbContext, UserManagement userManagement)
+    public RequestHandler(TaskManagementContext dbContext, UserService userService)
     {
         _dbContext = dbContext;
-        _userManagement = userManagement;
+        _userService = userService;
     }
 
     public async Task<Unit> Handle(CommentCreate request, CancellationToken cancellationToken)
     {
-        var userId = _userManagement.GetCurrentUserId();
+        var userId = _userService.GetCurrentUserId();
 
         var comment = new TaskComment
         {

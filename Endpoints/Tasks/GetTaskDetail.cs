@@ -1,7 +1,7 @@
 using Backend.Entities;
-using Backend.Services;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
+using AutoMapper;
 
 namespace Endpoints.Tasks.GetDetail;
 
@@ -10,7 +10,7 @@ public record UserData
     public string Id { get; init; } = string.Empty;
     public string Email { get; init; } = string.Empty;
     public string UserName { get; init; } = string.Empty;
-    public string Avatar { get; init; } = string.Empty;
+    public string AvatarUrl { get; init; } = string.Empty;
 }
 
 public record TaskDetailData
@@ -55,71 +55,47 @@ public class GetTaskDetail : IMapEndpoint
 public class RequestHandler : IRequestHandler<Request, TaskDetailData>
 {
     private readonly TaskManagementContext _dbContext;
-    private readonly UserManagement _userManagement;
+    private readonly IMapper _mapper;
 
-    public RequestHandler(
-        TaskManagementContext dbContext,
-        UserManagement userManagement)
+    public RequestHandler(TaskManagementContext dbContext, IMapper mapper)
     {
         _dbContext = dbContext;
-        _userManagement = userManagement;
+        _mapper = mapper;
     }
 
     public async Task<TaskDetailData> Handle(Request request, CancellationToken cancellationToken)
     {
-        var taskDetail = await _dbContext.Tasks
-            .Where(t => t.Id == request.Id)
-            .Select(t => new TaskDetailData
-            {
-                Id = t.Id,
-                Title = t.Title,
-                Description = t.Description,
-                IsCompleted = t.IsCompleted,
-                CreatedAt = t.CreatedAt,
-                Duedate = t.Duedate,
-                UserId = t.UserId,
-                AssigneeId = t.AssigneeId,
-                Category = new TaskDetailData.CategoryData
-                {
-                    Id = t.Category.Id,
-                    Name = t.Category.Name
-                }
-            })
+        var task = await _dbContext.Tasks
             .AsNoTracking()
-            .FirstOrDefaultAsync(cancellationToken);
+            .Include(t => t.User)
+            .Include(t => t.Assignee)
+            .Include(t => t.Category)
+            .FirstOrDefaultAsync(t => t.Id == request.Id, cancellationToken);
 
-        if (taskDetail == null)
+        if (task == null)
             throw new KeyNotFoundException($"Task {request.Id} not found");
 
-        // Fetch user data
-        var user = await _userManagement.FetchClerkUserAsync(taskDetail.UserId);
-        if (user != null)
-        {
-            taskDetail.User = new UserData
-            {
-                Id = user.Id,
-                Email = user.EmailAddresses.FirstOrDefault()?.Email ?? string.Empty,
-                UserName = $"{user.FirstName} {user.LastName}".Trim(),
-                Avatar = user.ImageUrl
-            };
-        }
+        var taskDetail = _mapper.Map<TaskDetailData>(task);
 
-        // Fetch assignee data
-        if (!string.IsNullOrEmpty(taskDetail.AssigneeId))
-        {
-            var assignee = await _userManagement.FetchClerkUserAsync(taskDetail.AssigneeId);
-            if (assignee != null)
-            {
-                taskDetail.Assignee = new UserData
-                {
-                    Id = assignee.Id,
-                    Email = assignee.EmailAddresses.FirstOrDefault()?.Email ?? string.Empty,
-                    UserName = $"{assignee.FirstName} {assignee.LastName}".Trim(),
-                    Avatar = assignee.ImageUrl
-                };
-            }
-        }
+        taskDetail.User = task.User != null ? _mapper.Map<UserData>(task.User) : null;
+        taskDetail.Assignee = task.Assignee != null ? _mapper.Map<UserData>(task.Assignee) : null;
 
         return taskDetail;
+    }
+}
+
+
+public class TaskDetailMappingProfile : Profile
+{
+    public TaskDetailMappingProfile()
+    {
+        CreateMap<Backend.Entities.User, UserData>();
+
+        CreateMap<TaskItem, TaskDetailData>()
+            .ForMember(dest => dest.Category, opt => opt.MapFrom(src => new TaskDetailData.CategoryData
+            {
+                Id = src.Category.Id,
+                Name = src.Category.Name
+            }));
     }
 }
