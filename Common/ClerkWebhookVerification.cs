@@ -1,8 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 
-using System.Security.Cryptography;
-using System.Text;
+
 
 public class ClerkWebhookVerificationMiddleware
 {
@@ -15,8 +14,6 @@ public class ClerkWebhookVerificationMiddleware
 
         var secret = configuration["Clerk:WebhookSigningSecret"]
             ?? throw new ArgumentException("Webhook signing secret is missing");
-
-        // Clerk's secret is base64 encoded (after removing the 'whsec_' prefix)
         _signingSecret = Convert.FromBase64String(secret.Replace("whsec_", ""));
     }
 
